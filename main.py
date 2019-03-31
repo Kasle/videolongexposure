@@ -1,65 +1,81 @@
 import cv2
 import numpy as np
+import threading
+import argparse
+import sys
+import time
 
-FINPUT = "tlfull"
+class long_exposure_generator:
 
-vidcap = cv2.VideoCapture(FINPUT + ".mp4")
+    nfact = 0.8
 
-fps = vidcap.get(cv2.CAP_PROP_FPS)
-dfps = 60
-mfps = int(fps/dfps)
-if (mfps < 1):
-    mfps = 1
-fnum = vidcap.get(cv2.CAP_PROP_FRAME_COUNT)
-print(fps, fnum, mfps-1)
+    def __init__(self, file_name, max_thread_count):
 
-nfact = 0.8
+        self.video_capture = cv2.VideoCapture(file_name)
+        self.video_fps = self.video_capture.get(cv2.CAP_PROP_FPS)
+        self.frame_count = self.video_capture.get(cv2.CAP_PROP_FRAME_COUNT)
+        self.current_frame_count = 0
 
-bt = [0.2, 0.7, 0.1]
+        self.read_lock = threading.Lock()
+        self.max_check_lock = threading.Lock()
 
-rs, frame = vidcap.read()
+        rs, frame = self.video_capture.read()
+        self.current_frame_count += 1
+        self.long_exposure_output = np.array(frame, dtype=np.float64)
+        self.max_frame = self.long_exposure_output
 
-timelapse = np.array(frame, dtype=np.float64)
-max_timelapse= timelapse
+        self.threads = []
+        self.finished_threads = 0
 
-#print(image)
+        for thread in range(max_thread_count):
+            self.threads.append(threading.Thread(target=self.process_frame))
+            self.threads[-1].daemon = True
+            self.threads[-1].start()
 
-#print(np.average([cnv, cnv], axis=0))
+        while self.finished_threads < max_thread_count:
+            print("waiting:", self.finished_threads, max_thread_count)
+            time.sleep(1)
 
-count = 1
-framecounter = 1
-cl = 2000
+        max_mult_factor = 0.45
+        self.long_exposure_output = np.clip(self.long_exposure_output, 0, 255*self.frame_count) / self.frame_count
+        final = np.clip(self.long_exposure_output + self.max_frame*max_mult_factor,0,255)
+        final = np.uint8(final)
+        print("writing")
+        cv2.imwrite(file_name[:file_name.rfind(".")] + ".jpg", final)  # save frame as JPEG file
+        print("done")
+        exit()
 
-while rs:
-    rs, frame = vidcap.read()
-    framecounter+=1
-    if (rs):
-        # timelapse += (255/(255**nfact))*np.power(np.array(frame, dtype=np.float64), nfact)
-        max_timelapse = np.maximum(max_timelapse, np.array(frame, dtype=np.uint64))
-        # timelapse += np.array(frame, dtype=np.float64)
-        # timelapse += np.power(np.array(frame, dtype=np.float64), 1.23)
-        # timelapse += np.clip(np.power(np.array(frame, dtype=np.float64), 1.23), 0, 255)
-        # timelapse += np.clip(255*np.power(np.array(frame, dtype=np.float64)/255, 1.2), 0, 255)
-        timelapse += np.clip(np.power(np.array(frame, dtype=np.float64), 1.10), 0, 255)
-        for i in range(mfps-1):
-            rs = vidcap.grab()
-            framecounter+=1
-        #print('Frame read:', rs)
-        count += 1
-    if count > cl:
-        rs = 0
-    if framecounter % 10 == 0:
-        print (100 * framecounter / fnum, "%")
-print ("100 %")
+    def process_frame(self):
+        try:
+            rs = True
+            while rs:
+                if self.current_frame_count > self.frame_count:
+                    break
+                self.read_lock.acquire()
+                if self.current_frame_count > self.frame_count:
+                    self.read_lock.release()
+                    break
+                #print(threading.get_ident(), "locking.")
+                rs, frame = self.video_capture.read()
+                self.current_frame_count += 1
+                #print(threading.get_ident(), "releasing.")
+                self.read_lock.release()
+                if (rs):
 
-max_mult_factor = 0.45
+                    print(threading.get_ident(), self.current_frame_count, self.frame_count)
+                    # long_exposure_output += (255/(255**nfact))*np.power(np.array(frame, dtype=np.float64), nfact)
+                    self.max_check_lock.acquire()
+                    self.max_frame = np.maximum(self.max_frame, np.array(frame, dtype=np.uint64))
+                    self.max_check_lock.release()
+                    # long_exposure_output += np.array(frame, dtype=np.float64)
+                    # long_exposure_output += np.power(np.array(frame, dtype=np.float64), 1.23)
+                    # long_exposure_output += np.clip(np.power(np.array(frame, dtype=np.float64), 1.23), 0, 255)
+                    # long_exposure_output += np.clip(255*np.power(np.array(frame, dtype=np.float64)/255, 1.2), 0, 255)
+                    self.long_exposure_output += np.clip(np.power(np.array(frame, dtype=np.float64), 1.10), 0, 255)
+        except:
+            return
+        self.finished_threads+=1
 
-timelapse = np.clip(timelapse, 0, 255*count) / count
 
-final = np.clip(timelapse + max_timelapse*max_mult_factor,0,255)
-
-final = np.uint8(final)
-
-#print(timelapse)
-
-cv2.imwrite(FINPUT + ".jpg", final)  # save frame as JPEG file
+if __name__ == "__main__":
+    long_exposure_generator(sys.argv[1], int(sys.argv[2]))
