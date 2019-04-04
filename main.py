@@ -22,8 +22,6 @@ class ti:
 
 class long_exposure_generator:
 
-    n_fact = 0.8
-
     def __init__(self, file_name):
 
         self.ti = ti()
@@ -36,6 +34,7 @@ class long_exposure_generator:
         self.finished_frames = 0
 
         frame_process_count = 100
+
 
         self.exposure_lock = threading.Lock()
         #self.max_check_lock = threading.Lock()
@@ -58,8 +57,6 @@ class long_exposure_generator:
             self.max_frame_buffer_1 = []
             self.max_frame_buffer_2 = []
 
-            self.ti.r()
-
             for i in range(frame_process_count):
 
                 frames_available, frame = self.video_capture.read()
@@ -70,21 +67,19 @@ class long_exposure_generator:
                 self.frame_buffer.append(frame)
                 self.max_frame_buffer_1.append(frame)
 
-            #max_thread = threading.Thread(target=self.process_max)
+            max_thread = threading.Thread(target=self.process_max)
             exposure_thread = threading.Thread(target=self.process_exposure)
 
-            #max_thread.daemon = True
+            max_thread.daemon = True
             exposure_thread.daemon = True
 
-            #max_thread.start()
+            max_thread.start()
             exposure_thread.start()
 
-            #max_thread.join()
+            max_thread.join()
             exposure_thread.join()
 
-            self.ti.c("main")
 
-            #exit()
 
         # self.frame_buffer = []
         #
@@ -125,11 +120,24 @@ class long_exposure_generator:
         #
         # self.long_exposure_output = np.clip(self.long_exposure_output, 0, 255*self.frame_count) / self.frame_count
 
-        # final = np.clip(self.long_exposure_output + self.max_frame*max_mult_factor,0,255)
-        # final = np.uint8(final)
+        max_mult_factor = 0.5
+
+        self.frame_accu_1 = np.clip(self.frame_accu_1, 0, 255*self.frame_count) / self.frame_count
+        #self.frame_accu_1 = np.clip(self.frame_accu_1, 0, 255*frame_process_count) / frame_process_count
+
+        final = np.clip(self.frame_accu_1 + self.max_frame*max_mult_factor,0,255)
+        final = np.uint8(final)
+
+        #cv2.imshow("image", final)
+        #cv2.waitKey(0)
+
         print("writing")
-        cv2.imwrite(file_name[:file_name.rfind(".")] + ".jpg", self.max_frame)  # save frame as JPEG file
+        cv2.imwrite(file_name[:file_name.rfind(".")] + ".jpg", final)  # save frame as JPEG file
+
+        self.ti.c("main")
+
         #print("done. took", time.time() - ts, "s using", max_thread_count, "threads")
+
         exit()
 
     def process_max(self):
